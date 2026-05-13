@@ -1,0 +1,509 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<title>next-exam Timeline Diff Viewer</title>
+
+<style>
+
+body{
+    margin:0;
+    font-family:Arial,sans-serif;
+    background:#f3f3f3;
+    overflow:hidden;
+}
+
+/* =========================
+   Upload
+========================= */
+
+#uploadContainer{
+    position:fixed;
+    top:10px;
+    right:10px;
+    z-index:100;
+    opacity:0.2;
+    transition:0.2s;
+}
+
+#uploadContainer:hover{
+    opacity:1;
+}
+
+/* =========================
+   Main Layout
+========================= */
+
+#main{
+    position:absolute;
+    top:0;
+    left:0;
+    right:0;
+    bottom:90px;
+
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:1px;
+
+    background:#d8d8d8;
+}
+
+/* =========================
+   Panels
+========================= */
+
+.panel{
+    background:white;
+
+    overflow:auto;
+
+    padding:50px;
+    box-sizing:border-box;
+
+    white-space:pre-wrap;
+    overflow-wrap:break-word;
+
+    line-height:1.7;
+    font-size:18px;
+}
+
+/* =========================
+   Highlights
+========================= */
+
+.added{
+    background:#c8f7c5;
+    border-radius:4px;
+    padding:1px 2px;
+}
+
+.removed{
+    background:#ffd6d6;
+    border-radius:4px;
+    padding:1px 2px;
+    text-decoration:line-through;
+}
+
+/* =========================
+   Bottom Bar
+========================= */
+
+#bottomBar{
+    position:fixed;
+    left:0;
+    right:0;
+    bottom:0;
+
+    height:90px;
+
+    background:rgba(255,255,255,0.96);
+
+    backdrop-filter:blur(8px);
+
+    border-top:1px solid #ccc;
+
+    display:flex;
+    flex-direction:column;
+    justify-content:center;
+
+    padding:10px 30px;
+    box-sizing:border-box;
+}
+
+/* =========================
+   Meta
+========================= */
+
+#meta{
+    display:flex;
+    justify-content:space-between;
+
+    font-size:14px;
+    color:#666;
+
+    margin-bottom:10px;
+}
+
+/* =========================
+   Slider
+========================= */
+
+#slider{
+    width:100%;
+}
+
+/* =========================
+   Scrollbars
+========================= */
+
+::-webkit-scrollbar{
+    width:10px;
+    height:10px;
+}
+
+::-webkit-scrollbar-thumb{
+    background:#ccc;
+    border-radius:10px;
+}
+
+::-webkit-scrollbar-track{
+    background:#f3f3f3;
+}
+
+</style>
+</head>
+
+<body>
+
+<!-- =========================
+     Upload
+========================= -->
+
+<div id="uploadContainer">
+    <input type="file" id="fileInput" accept=".json">
+</div>
+
+<!-- =========================
+     Main
+========================= -->
+
+<div id="main">
+
+    <div class="panel" id="leftPanel">
+        JSON laden …
+    </div>
+
+    <div class="panel" id="rightPanel">
+        JSON laden …
+    </div>
+
+</div>
+
+<!-- =========================
+     Bottom Bar
+========================= -->
+
+<div id="bottomBar">
+
+    <div id="meta">
+
+        <div id="timeInfo">
+            -
+        </div>
+
+        <div id="statsInfo">
+            -
+        </div>
+
+    </div>
+
+    <input type="range" id="slider" min="0" max="0" value="0">
+
+</div>
+
+<script>
+
+/* =========================================
+   Globals
+========================================= */
+
+let versions = [];
+
+const fileInput = document.getElementById("fileInput");
+const slider = document.getElementById("slider");
+
+const leftPanel = document.getElementById("leftPanel");
+const rightPanel = document.getElementById("rightPanel");
+
+const timeInfo = document.getElementById("timeInfo");
+const statsInfo = document.getElementById("statsInfo");
+
+/* =========================================
+   Upload
+========================================= */
+
+fileInput.addEventListener("change", async (e)=>{
+
+    const file = e.target.files[0];
+
+    if(!file) return;
+
+    try{
+
+        const text = await file.text();
+
+        versions = JSON.parse(text);
+
+        if(versions.length < 2){
+
+            alert("Mindestens zwei Versionen erforderlich.");
+            return;
+        }
+
+        slider.max = versions.length - 1;
+
+        slider.value = 1;
+
+        render();
+
+    }catch(err){
+
+        console.error(err);
+
+        alert("Ungültige JSON-Datei.");
+    }
+});
+
+/* =========================================
+   Slider
+========================================= */
+
+slider.addEventListener("input", render);
+
+/* =========================================
+   Render
+========================================= */
+
+function render(){
+
+    const index = parseInt(slider.value);
+
+    const current = versions[index];
+
+    const previous =
+        index > 0
+        ? versions[index - 1]
+        : { text:"" };
+
+    const diff = diffWords(
+        previous.text || "",
+        current.text || ""
+    );
+
+    leftPanel.innerHTML = diff.left;
+    rightPanel.innerHTML = diff.right;
+
+    // =========================
+    // Zeitinfo
+    // =========================
+
+    timeInfo.textContent =
+        `${formatTimestamp(previous.timestamp)} → ${formatTimestamp(current.timestamp)}`;
+
+    // =========================
+    // Statistik
+    // =========================
+
+    const currentWords = countWords(current.text || "");
+    const previousWords = countWords(previous.text || "");
+
+    const delta = currentWords - previousWords;
+
+    statsInfo.textContent =
+        `${currentWords} Wörter | +${delta}`;
+
+    // =========================
+    // Scroll ans Ende
+    // =========================
+
+    requestAnimationFrame(()=>{
+
+        leftPanel.scrollTop = leftPanel.scrollHeight;
+        rightPanel.scrollTop = rightPanel.scrollHeight;
+
+    });
+}
+
+/* =========================================
+   Timestamp
+========================================= */
+
+function formatTimestamp(ts){
+
+    if(!ts) return "-";
+
+    const d = new Date(ts);
+
+    return d.toLocaleString("de-DE");
+}
+
+/* =========================================
+   Diff Algorithmus
+========================================= */
+
+function diffWords(oldText,newText){
+
+    const a = tokenize(oldText);
+    const b = tokenize(newText);
+
+    const matrix = [];
+
+    for(let i=0;i<=a.length;i++){
+
+        matrix[i] = [];
+
+        for(let j=0;j<=b.length;j++){
+
+            matrix[i][j] = 0;
+        }
+    }
+
+    for(let i=1;i<=a.length;i++){
+
+        for(let j=1;j<=b.length;j++){
+
+            if(a[i-1] === b[j-1]){
+
+                matrix[i][j] =
+                    matrix[i-1][j-1] + 1;
+
+            }else{
+
+                matrix[i][j] = Math.max(
+                    matrix[i-1][j],
+                    matrix[i][j-1]
+                );
+            }
+        }
+    }
+
+    let i = a.length;
+    let j = b.length;
+
+    const left = [];
+    const right = [];
+
+    while(i > 0 && j > 0){
+
+        if(a[i-1] === b[j-1]){
+
+            left.unshift(escapeHtml(a[i-1]));
+            right.unshift(escapeHtml(b[j-1]));
+
+            i--;
+            j--;
+
+        }else if(
+            matrix[i-1][j] > matrix[i][j-1]
+        ){
+
+            left.unshift(
+                `<span class="removed">${escapeHtml(a[i-1])}</span>`
+            );
+
+            right.unshift("");
+
+            i--;
+
+        }else{
+
+            left.unshift("");
+
+            right.unshift(
+                `<span class="added">${escapeHtml(b[j-1])}</span>`
+            );
+
+            j--;
+        }
+    }
+
+    while(i > 0){
+
+        left.unshift(
+            `<span class="removed">${escapeHtml(a[i-1])}</span>`
+        );
+
+        right.unshift("");
+
+        i--;
+    }
+
+    while(j > 0){
+
+        left.unshift("");
+
+        right.unshift(
+            `<span class="added">${escapeHtml(b[j-1])}</span>`
+        );
+
+        j--;
+    }
+
+    return{
+        left:left.join(" "),
+        right:right.join(" ")
+    };
+}
+
+/* =========================================
+   Tokenize
+========================================= */
+
+function tokenize(text){
+
+    return text.match(/\S+|\s+/g) || [];
+}
+
+/* =========================================
+   Count Words
+========================================= */
+
+function countWords(text){
+
+    return text
+        .trim()
+        .split(/\s+/)
+        .filter(Boolean)
+        .length;
+}
+
+/* =========================================
+   Escape HTML
+========================================= */
+
+function escapeHtml(str){
+
+    return str
+        .replace(/&/g,"&amp;")
+        .replace(/</g,"&lt;")
+        .replace(/>/g,"&gt;");
+}
+
+/* =========================================
+   Sync Scroll
+========================================= */
+
+let syncing = false;
+
+leftPanel.addEventListener("scroll",()=>{
+
+    if(syncing) return;
+
+    syncing = true;
+
+    rightPanel.scrollTop = leftPanel.scrollTop;
+
+    requestAnimationFrame(()=>{
+        syncing = false;
+    });
+});
+
+rightPanel.addEventListener("scroll",()=>{
+
+    if(syncing) return;
+
+    syncing = true;
+
+    leftPanel.scrollTop = rightPanel.scrollTop;
+
+    requestAnimationFrame(()=>{
+        syncing = false;
+    });
+});
+
+</script>
+
+</body>
+</html>
